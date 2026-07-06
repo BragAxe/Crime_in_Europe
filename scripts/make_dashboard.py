@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Build a self-contained interactive dashboard (Tool B: Plotly.js / JavaScript).
+Reads data/dashboard_data.json and writes out/dashboard.html.
+Centrepiece: an interactive European choropleth with an offence dropdown."""
+import os, json
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE) if os.path.basename(HERE)=="scripts" else HERE
+DATA = json.load(open(os.path.join(ROOT, "data", "dashboard_data.json")))
+OUT  = os.path.join(ROOT, "dashboard.html")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
+
+DATA_JS = json.dumps(DATA, ensure_ascii=False)
+
+HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crime in Europe — interactive dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<style>
+  :root{
+    --paper:#F5F2EB; --card:#FFFFFF; --ink:#1B1B25; --mute:#6C6C78;
+    --faint:#9A958A; --rule:#D9D4C8; --slate:#2C6E6A; --crim:#A6132A;
+    --sand:#C9C0AE; --gold:#C8772E;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font-family:"Helvetica Neue",Arial,"Liberation Sans",sans-serif;}
+  .mono{font-family:"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;}
+  .wrap{max-width:1180px;margin:0 auto;padding:34px 30px 60px;}
+  header{border-bottom:1px solid var(--rule);padding-bottom:18px;margin-bottom:26px;}
+  .eyebrow{font-family:monospace;letter-spacing:2.4px;font-size:11px;
+           color:var(--crim);font-weight:700;text-transform:uppercase;}
+  h1{font-size:34px;line-height:1.08;margin:10px 0 6px;font-weight:800;letter-spacing:-.3px;}
+  h1 .dot{color:var(--crim);}
+  .sub{color:var(--mute);font-size:15px;font-style:italic;
+       font-family:Georgia,"DejaVu Serif",serif;max-width:720px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;}
+  .card{background:var(--card);border:1px solid var(--rule);border-radius:14px;
+        padding:18px 20px 14px;box-shadow:0 6px 18px rgba(0,0,0,.06);}
+  .card.full{grid-column:1 / -1;}
+  .ctitle{font-family:monospace;letter-spacing:1.6px;font-size:11px;font-weight:700;
+          color:var(--faint);text-transform:uppercase;margin-bottom:2px;}
+  .cbig{font-size:19px;font-weight:800;margin:2px 0 4px;letter-spacing:-.2px;}
+  .cnote{color:var(--mute);font-size:12.5px;line-height:1.5;margin:0 0 8px;}
+  .plot{width:100%;}
+  .controls{display:flex;align-items:center;gap:10px;margin:2px 0 8px;flex-wrap:wrap;}
+  .controls label{font-family:monospace;font-size:11px;letter-spacing:1px;
+                  color:var(--faint);text-transform:uppercase;}
+  select{font-family:inherit;font-size:14px;padding:6px 30px 6px 12px;border-radius:8px;
+         border:1px solid var(--rule);background:var(--card);color:var(--ink);cursor:pointer;
+         -webkit-appearance:none;appearance:none;
+         background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><path d='M0 2 L5 8 L10 2' fill='none' stroke='%236C6C78' stroke-width='1.6'/></svg>");
+         background-repeat:no-repeat;background-position:right 10px center;}
+  .tag{display:inline-block;font-family:monospace;font-size:10.5px;letter-spacing:.6px;
+       color:var(--slate);border:1px solid var(--rule);border-radius:20px;
+       padding:2px 9px;margin-left:6px;}
+  .rqline{color:var(--crim);font-weight:700;}
+  footer{margin-top:30px;border-top:1px solid var(--rule);padding-top:16px;
+         color:var(--faint);font-family:monospace;font-size:11px;letter-spacing:.4px;
+         display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+  a{color:var(--slate);}
+  @media(max-width:820px){.grid{grid-template-columns:1fr;} h1{font-size:27px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Interactive dashboard · Eurostat crim_off_cat</div>
+    <h1>Crime in Europe: one word, many trends<span class="dot">.</span></h1>
+    <div class="sub">Police-recorded offences in the EU, 2008&ndash;2024 &mdash; why &ldquo;is crime rising?&rdquo; has no single answer. Hover any element; switch the offence on the map.</div>
+  </header>
+
+  <div class="grid">
+    <!-- MAP (interactive geographic component) -->
+    <div class="card full">
+      <div class="ctitle">Geography · rate per 100 000 · 2024 <span class="tag">RQ2 · interactive map</span></div>
+      <div class="cbig">Where is crime concentrated &mdash; and is that even &ldquo;crime&rdquo;?</div>
+      <div class="controls">
+        <label for="off">Offence</label>
+        <select id="off">
+          <option value="homicide" selected>Intentional homicide</option>
+          <option value="theft">Theft</option>
+          <option value="burglary">Burglary</option>
+          <option value="robbery">Robbery</option>
+        </select>
+        <span id="hint" class="cnote" style="margin:0;"></span>
+      </div>
+      <div id="map" class="plot" style="height:470px;"></div>
+    </div>
+
+    <!-- COMPOSITION -->
+    <div class="card">
+      <div class="ctitle">Composition &amp; severity <span class="tag">RQ1</span></div>
+      <div class="cbig">The volume of crime is property crime</div>
+      <p class="cnote">Recorded offences by category, EU-27, 2024, on a logarithmic axis. Homicide (crimson) is ~1&nbsp;330&times; rarer than theft.</p>
+      <div id="comp" class="plot" style="height:340px;"></div>
+    </div>
+
+    <!-- THEFT TREND -->
+    <div class="card">
+      <div class="ctitle">Trend &amp; pandemic <span class="tag">RQ3</span></div>
+      <div class="cbig">Property crime is mobility-sensitive</div>
+      <p class="cnote">Thefts fell ~20% by 2021 (lockdowns), rebounded ~21% by 2024, then cooled 2% year-on-year.</p>
+      <div id="trend" class="plot" style="height:340px;"></div>
+    </div>
+
+    <!-- SEXUAL VIOLENCE INDEX -->
+    <div class="card full">
+      <div class="ctitle">Reporting vs incidence <span class="tag">RQ4</span></div>
+      <div class="cbig">Sexual violence: a decade of rising reports (2014 = 100)</div>
+      <p class="cnote">Recorded sexual violence +94% and rape +150% since 2014, on a consistent country basket. Eurostat cautions this partly reflects greater awareness and reporting &mdash; not incidence alone.</p>
+      <div id="sv" class="plot" style="height:330px;"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Source: Eurostat (crim_off_cat), &copy; European Union &mdash; police-recorded offences, EU-27.</span>
+    <span>Built with Plotly.js &middot; figures reconstructed from the raw Eurostat export.</span>
+  </footer>
+</div>
+
+<script>
+const D = __DATA__;
+const INK="#1B1B25", MUTE="#6C6C78", SLATE="#2C6E6A", CRIM="#A6132A",
+      SAND="#C9C0AE", GRID="#E8E4DB", PAPER="rgba(0,0,0,0)";
+const FONT = {family:'"Helvetica Neue",Arial,"Liberation Sans",sans-serif', size:12, color:INK};
+const CFG  = {displayModeBar:false, responsive:true};
+const seqCrim = [[0,"#F7EDE9"],[0.25,"#E7A8A0"],[0.5,"#C6504E"],[0.75,"#A6132A"],[1,"#6E0C1C"]];
+const seqSlate= [[0,"#EAF1F0"],[0.35,"#8FBAB6"],[0.7,"#3E827D"],[1,"#1F5350"]];
+
+/* ---------- MAP ---------- */
+const OFF = {
+  homicide:{scale:seqCrim, unit:"per 100k", title:"Homicide / 100k",
+    hint:"Baltics highest, Italy &amp; Luxembourg lowest &mdash; the most internationally comparable offence."},
+  theft:{scale:seqSlate, unit:"per 100k", title:"Theft / 100k",
+    hint:"Range explodes (&times;47) and the map inverts: Nordic highs are a <b>recording</b> artefact, not a crime wave."},
+  burglary:{scale:seqSlate, unit:"per 100k", title:"Burglary / 100k",
+    hint:"Concentrated in the west; several states do not report the category."},
+  robbery:{scale:seqSlate, unit:"per 100k", title:"Robbery / 100k",
+    hint:"Higher in parts of the south &amp; west; definitions differ across borders."},
+};
+function mapTrace(off){
+  const z = D.rates[off];
+  const o = OFF[off];
+  const vals = z.filter(v=>v!==null);
+  const zmax = Math.max(...vals);
+  return {
+    type:"choropleth", locationmode:"ISO-3",
+    locations:D.rates.iso3, z:z, text:D.rates.country,
+    zmin:0, zmax:zmax, colorscale:o.scale, reversescale:false,
+    marker:{line:{color:"#FFFFFF", width:0.6}},
+    colorbar:{title:{text:o.title, font:{size:11,color:MUTE}}, thickness:12,
+              len:0.72, x:0.99, tickfont:{size:10,color:MUTE}, outlinewidth:0},
+    hovertemplate:"<b>%{text}</b><br>%{z:.2f} "+o.unit+"<extra></extra>",
+  };
+}
+const geo = {scope:"europe", resolution:50, showframe:false, showcountries:true,
+  countrycolor:"#FFFFFF", showcoastlines:false, showland:true, landcolor:"#ECE7DC",
+  showlakes:false, bgcolor:PAPER, projection:{type:"mercator"},
+  lataxis:{range:[34.5,71.5]}, lonaxis:{range:[-12,33]}};
+const mapLayout = {geo:geo, margin:{l:0,r:0,t:6,b:0}, paper_bgcolor:PAPER, font:FONT,
+  dragmode:false};
+Plotly.newPlot("map", [mapTrace("homicide")], mapLayout, CFG);
+document.getElementById("hint").innerHTML = OFF.homicide.hint;
+document.getElementById("off").addEventListener("change", e=>{
+  const off = e.target.value;
+  Plotly.react("map", [mapTrace(off)], mapLayout, CFG);
+  document.getElementById("hint").innerHTML = OFF[off].hint;
+});
+
+/* ---------- COMPOSITION (log bar) ---------- */
+(function(){
+  const cat = D.composition.category.slice(), val = D.composition.value.slice();
+  // ascending
+  const order = val.map((v,i)=>i).sort((a,b)=>val[a]-val[b]);
+  const c = order.map(i=>cat[i]), v = order.map(i=>val[i]);
+  const col = c.map(x=> x==="Intentional homicide"?CRIM:SLATE);
+  Plotly.newPlot("comp", [{
+    type:"bar", orientation:"h", x:v, y:c, marker:{color:col},
+    text:v.map(n=>n.toLocaleString("en").replace(/,/g," ")),
+    textposition:"outside", textfont:{size:11,color:INK},
+    hovertemplate:"%{y}: %{x:,} offences<extra></extra>",
+  }],{
+    xaxis:{type:"log", showgrid:true, gridcolor:GRID, zeroline:false,
+           tickfont:{size:10,color:MUTE}, range:[3,7.5]},
+    yaxis:{tickfont:{size:12,color:INK}, automargin:true},
+    margin:{l:8,r:70,t:6,b:24}, paper_bgcolor:PAPER, plot_bgcolor:PAPER, font:FONT,
+    bargap:0.36,
+  }, CFG);
+})();
+
+/* ---------- THEFT TREND ---------- */
+(function(){
+  const yr=D.theft_trend.year, v=D.theft_trend.value.map(x=>x/1e6);
+  const i21=yr.indexOf(2021), i19=yr.indexOf(2019), i24=yr.indexOf(2024);
+  Plotly.newPlot("trend", [{
+    type:"scatter", mode:"lines+markers", x:yr, y:v,
+    line:{color:SLATE, width:2.6, shape:"linear"}, marker:{size:5,color:SLATE},
+    hovertemplate:"%{x}: %{y:.2f}M thefts<extra></extra>",
+  },{
+    type:"scatter", mode:"markers", x:[yr[i19],yr[i21],yr[i24]],
+    y:[v[i19],v[i21],v[i24]], marker:{size:11,color:[MUTE,CRIM,"#1F5350"],
+    line:{color:"#fff",width:1.4}}, hoverinfo:"skip", showlegend:false,
+  }],{
+    shapes:[{type:"rect", x0:2020, x1:2021.35, y0:3.8, y1:7.7, xref:"x", yref:"y",
+             fillcolor:"#F2ECE0", line:{width:0}, layer:"below"}],
+    annotations:[
+      {x:2020.67,y:7.35,text:"COVID-19",showarrow:false,
+       font:{family:"monospace",size:10,color:"#C8772E"}},
+      {x:2021,y:v[i21],ax:38,ay:34,text:"trough \u221220%",
+       font:{size:11,color:CRIM},arrowcolor:CRIM,arrowwidth:1.1},
+      {x:2024,y:v[i24],ax:-4,ay:-38,text:"+21% rebound",
+       font:{size:11,color:"#1F5350"},arrowcolor:"#1F5350",arrowwidth:1.1},
+    ],
+    xaxis:{tickfont:{size:10,color:MUTE}, dtick:2, showgrid:false,
+           range:[2007.4,2024.6]},
+    yaxis:{tickfont:{size:10,color:MUTE}, gridcolor:GRID, zeroline:false,
+           ticksuffix:"M", range:[3.8,7.7]},
+    margin:{l:34,r:16,t:10,b:24}, paper_bgcolor:PAPER, plot_bgcolor:PAPER, font:FONT,
+  }, CFG);
+})();
+
+/* ---------- SEXUAL VIOLENCE INDEX ---------- */
+(function(){
+  const cat=D.sv_index.category, idx=D.sv_index.index, g=D.sv_index.growth;
+  Plotly.newPlot("sv", [
+    {type:"bar", name:"2014 (=100)", x:cat, y:cat.map(()=>100), marker:{color:SAND},
+     hovertemplate:"%{x} 2014: 100<extra></extra>"},
+    {type:"bar", name:"2024", x:cat, y:idx, marker:{color:CRIM},
+     text:g.map(x=>"+"+Math.round(x)+"%"), textposition:"outside",
+     textfont:{size:13,color:CRIM},
+     hovertemplate:"%{x} 2024: %{y:.0f} (index)<extra></extra>"},
+  ],{
+    barmode:"group", bargap:0.45, bargroupgap:0.12,
+    xaxis:{tickfont:{size:13,color:INK}},
+    yaxis:{tickfont:{size:10,color:MUTE}, gridcolor:GRID, zeroline:false,
+           range:[0,300], title:{text:"2014 = 100",font:{size:11,color:MUTE}}},
+    legend:{orientation:"h", x:0, y:1.12, font:{size:11,color:MUTE}},
+    margin:{l:44,r:16,t:20,b:26}, paper_bgcolor:PAPER, plot_bgcolor:PAPER, font:FONT,
+  }, CFG);
+})();
+</script>
+</body>
+</html>
+"""
+
+html = HTML.replace("__DATA__", DATA_JS)
+with open(OUT, "w") as f:
+    f.write(html)
+print("wrote", OUT, "(", len(html), "bytes )")
